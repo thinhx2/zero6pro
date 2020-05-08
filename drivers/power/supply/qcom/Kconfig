@@ -82,4 +82,8 @@ config QPNP_QNOVO
 	  module. It also allows userspace code to read diagnostics of voltage
 	  and current measured during certain phases of the pulses.
 
+config FACT_LIMIT_BAT
+	bool "Factory Battery limitation driver"
+	help
+	  Say Y here to enable the Factory battery limitation driver.
 endmenu
