@@ -593,6 +593,13 @@ struct mdss_dsi_ctrl_pdata {
 	bool phy_power_off;
 };
 
+#ifdef CONFIG_TOUCHSCREEN_NT36xxx
+struct dsi_ts_data {
+	uint8_t dsi_nvt_gesture_en;
+};
+extern struct dsi_ts_data *dsi_ts;
+#endif
+
 struct dsi_status_data {
 	struct notifier_block fb_notifier;
 	struct delayed_work check_status;

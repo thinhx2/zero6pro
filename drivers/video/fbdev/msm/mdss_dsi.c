@@ -37,6 +37,89 @@
 
 #define CMDLINE_DSI_CTL_NUM_STRING_LEN 2
 
+#ifdef CONFIG_TOUCHSCREEN_NT36xxx
+#include <asm/uaccess.h>
+#include <linux/slab.h>
+#include <linux/proc_fs.h>
+#define DSI_NVT_GESTURE_EN "dsi_nvt_gesture"
+
+static struct proc_dir_entry *DSI_NVT_proc_gesture_enable_entry;
+
+#define GESTURE_ENABLE   (1)
+#define GESTURE_DISABLE  (0)
+
+struct dsi_ts_data *dsi_ts;
+
+static ssize_t dsi_nvt_gesture_enable_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
+{
+	int ret = 0;
+	int len;
+	uint8_t *ptr = NULL;
+
+	if(*ppos) {
+		return 0;
+	}
+
+	ptr = kzalloc(sizeof(uint8_t)*8, GFP_KERNEL);
+	if (ptr == NULL) {
+		pr_err("failed to allocate memory for ptr\n");
+		return 0;
+	}
+
+	len = sprintf(ptr, "%d\n", dsi_ts->dsi_nvt_gesture_en);
+	ret = copy_to_user(buf, ptr, len);
+
+	*ppos += len;
+
+	if (!IS_ERR_OR_NULL(ptr)) {
+		kfree(ptr);
+		ptr = NULL;
+	}
+
+	return len;
+}
+
+
+static ssize_t dsi_nvt_gesture_enable_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos)
+{
+	int ret;
+	unsigned int input;
+	char cmd[512] = {0};
+
+	ret = copy_from_user(cmd, buf, count);
+	if (ret)
+		return -EINVAL;
+
+	ret = kstrtouint(cmd, 0, &input);
+	if (ret)
+		return -EINVAL;
+
+	dsi_ts->dsi_nvt_gesture_en = input > 0 ? GESTURE_ENABLE : GESTURE_DISABLE;
+	pr_debug("Gesture %s\n", dsi_ts->dsi_nvt_gesture_en ? "enable" : "disable");
+
+	return count;
+}
+
+static const struct file_operations dsi_nvt_gesture_enable_fops = {
+	.owner = THIS_MODULE,
+	.write = dsi_nvt_gesture_enable_write,
+	.read = dsi_nvt_gesture_enable_read,
+	.llseek = no_llseek,
+};
+
+static int32_t dsi_nvt_extra_proc_init(void)
+{
+	DSI_NVT_proc_gesture_enable_entry = proc_create(DSI_NVT_GESTURE_EN, 0222, NULL,&dsi_nvt_gesture_enable_fops);
+	if (DSI_NVT_proc_gesture_enable_entry == NULL) {
+		pr_err("create proc/dsi_nvt_gesture Failed!\n");
+		return -ENOMEM;
+	} else {
+		pr_info("create proc/dsi_nvt_gesture Succeeded!\n");
+	}
+	return 0;
+}
+#endif
+
 /* Master structure to hold all the information about the DSI/panel */
 static struct mdss_dsi_data *mdss_dsi_res;
 
@@ -362,7 +445,6 @@ static int mdss_dsi_regulator_init(struct platform_device *pdev,
 
 	return rc;
 }
-
 static int mdss_dsi_panel_power_off(struct mdss_panel_data *pdata)
 {
 	int ret = 0;
@@ -386,9 +468,17 @@ static int mdss_dsi_panel_power_off(struct mdss_panel_data *pdata)
 	if (mdss_dsi_pinctrl_set_state(ctrl_pdata, false))
 		pr_debug("reset disable: pinctrl not enabled\n");
 
+
+#ifdef CONFIG_TOUCHSCREEN_NT36xxx
+	if(!dsi_ts->dsi_nvt_gesture_en) {
+#endif
 	ret = msm_dss_enable_vreg(
 		ctrl_pdata->panel_power_data.vreg_config,
 		ctrl_pdata->panel_power_data.num_vreg, 0);
+#ifdef CONFIG_TOUCHSCREEN_NT36xxx
+	}
+#endif
+
 	if (ret)
 		pr_err("%s: failed to disable vregs for %s\n",
 			__func__, __mdss_dsi_pm_name(DSI_PANEL_PM));
@@ -410,6 +500,9 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata)
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
 
+#ifdef CONFIG_TOUCHSCREEN_NT36xxx
+	if(!dsi_ts->dsi_nvt_gesture_en) {
+#endif
 	ret = msm_dss_enable_vreg(
 		ctrl_pdata->panel_power_data.vreg_config,
 		ctrl_pdata->panel_power_data.num_vreg, 1);
@@ -417,6 +510,9 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata)
 		pr_err("%s: failed to enable vregs for %s\n",
 			__func__, __mdss_dsi_pm_name(DSI_PANEL_PM));
 		return ret;
+#ifdef CONFIG_TOUCHSCREEN_NT36xxx
+	}
+#endif
 	}
 
 	/*
@@ -1485,6 +1581,7 @@ int mdss_dsi_on(struct mdss_panel_data *pdata)
 		return -EINVAL;
 	}
 
+	printk("mdss_dsi_on\n");
 	ctrl_pdata = container_of(pdata, struct mdss_dsi_ctrl_pdata,
 				panel_data);
 
@@ -3302,6 +3399,15 @@ static int mdss_dsi_ctrl_probe(struct platform_device *pdev)
 	static int te_irq_registered;
 	struct mdss_panel_data *pdata;
 
+#ifdef CONFIG_TOUCHSCREEN_NT36xxx
+	dsi_ts = kmalloc(sizeof(struct dsi_ts_data), GFP_KERNEL);
+		if (dsi_ts == NULL) {
+			pr_err("failed to allocated memory for dsi ts data\n");
+			return -ENOMEM;
+		}
+	dsi_ts->dsi_nvt_gesture_en = false;
+#endif
+
 	if (!pdev || !pdev->dev.of_node) {
 		pr_err("%s: pdev not found for DSI controller\n", __func__);
 		return -ENODEV;
@@ -3476,6 +3582,10 @@ static int mdss_dsi_ctrl_probe(struct platform_device *pdev)
 		ctrl_pdata->shared_data->dsi1_active = true;
 
 	mdss_dsi_debug_bus_init(mdss_dsi_res);
+
+#ifdef CONFIG_TOUCHSCREEN_NT36xxx
+	dsi_nvt_extra_proc_init();
+#endif
 
 	return 0;
 
